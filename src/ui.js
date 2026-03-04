@@ -45,6 +45,29 @@ export function updateStatus(state, msg) {
   }, 5000);
 }
 
+export function showGhostPreview(state) {
+  if (!state.ghostOverlay || !state.video || !state.originalCues[state.selectedCueIndex]) {
+    if (state.ghostOverlay) state.ghostOverlay.style.display = "none";
+    return;
+  }
+
+  const idx = state.selectedCueIndex;
+  const predOffset =
+    state.video.currentTime -
+    (state.originalCues[idx].start + state.originalCues[idx].end) / 2;
+    
+  const active = state.originalCues.filter(
+    (c) =>
+      c.start + predOffset <= state.video.currentTime &&
+      c.end + predOffset > state.video.currentTime
+  );
+
+  state.ghostOverlay.innerHTML = active
+    .map((c) => `<div>${escapeHtml(c.text)}</div>`)
+    .join("");
+  state.ghostOverlay.style.display = active.length ? "block" : "none";
+}
+
 export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
   if (state.cylinderUI) return;
 
@@ -142,11 +165,15 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
       el.style.background = "rgba(0,140,70,0.15)";
       el.querySelector("span:last-child").style.color = "#afa";
       state.selectedCueIndex = parseInt(el.dataset.idx, 10);
+      showGhostPreview(state);
     });
 
     scroll.appendChild(el);
     if (sel) {
-      setTimeout(() => el.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
+      setTimeout(() => {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        showGhostPreview(state);
+      }, 80);
     }
   });
 
@@ -168,4 +195,35 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
   state.cylinderBackdrop.addEventListener("click", (e) => {
     if (e.target === state.cylinderBackdrop) onHideUI();
   });
+
+  if (state.video) {
+    const syncSelectionToTime = () => {
+      if (!state.cylinderUI || !state.originalCues.length) return;
+      const now = state.video.currentTime || 0;
+      let nearest = state.selectedCueIndex;
+      let best = Infinity;
+      state.originalCues.forEach((c, i) => {
+        const d = Math.abs((c.start + c.end) / 2 - now);
+        if (d < best) {
+          best = d;
+          nearest = i;
+        }
+      });
+      if (nearest === state.selectedCueIndex) return;
+      state.selectedCueIndex = nearest;
+      const selEl = scroll.querySelector(`[data-idx="${nearest}"]`);
+      if (!selEl) return;
+      scroll.querySelectorAll("[data-idx]").forEach((x) => {
+        x.style.border = "1px solid #162b1e";
+        x.style.background = "rgba(255,255,255,0.02)";
+        x.querySelector("span:last-child").style.color = "#bbb";
+      });
+      selEl.style.border = "1px solid #0a5";
+      selEl.style.background = "rgba(0,140,70,0.15)";
+      selEl.querySelector("span:last-child").style.color = "#afa";
+      selEl.scrollIntoView({ block: "center", behavior: "smooth" });
+    };
+    state.video.addEventListener("timeupdate", syncSelectionToTime, { signal: state.controller.signal });
+  }
 }
+
