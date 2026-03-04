@@ -1,73 +1,141 @@
 const WORKER_CODE = `
-let segs=[],inSpeech=false,speechStart=0,smoothE=0,subGaps=[];
+let segs = [], subGaps = [];
 let lastMatchTime = 0;
+let cadenceSignatures = [];
+let hasPerformedCoarseSweep = false;
 
-self.onmessage=function(e){
-  if(e.data.type==='init'){subGaps=e.data.subtitleGaps||[];segs=[];inSpeech=false;smoothE=0;return;}
-  if(e.data.type==='pcm'){
-    const pcm=e.data.data,ts=e.data.ts;
-    let en=0; for(let i=0;i<pcm.length;i++) en+=pcm[i]*pcm[i];
-    en=Math.sqrt(en/pcm.length);
-    smoothE=0.88*smoothE+0.12*en;
-    const thr=Math.max(0.012,smoothE*1.9),now=en>thr;
-    if(now&&!inSpeech){inSpeech=true;speechStart=ts;}
-    else if(!now&&inSpeech){
-      inSpeech=false;
-      const dur=ts-speechStart;
-      if(dur>=0.18){
-        segs.push({start:speechStart,end:ts});
-        if(segs.length>400)segs.shift();
-        if(segs.length>=10)tryMatch();
+self.onmessage = function(e) {
+  if (e.data.type === 'init') {
+    subGaps = e.data.subtitleGaps || [];
+    segs = [];
+    hasPerformedCoarseSweep = false;
+    cadenceSignatures = generateSignatures(subGaps);
+    return;
+  }
+  if (e.data.type === 'pcm') {
+    const pcm = e.data.data, ts = e.data.ts;
+    let en = 0; for (let i = 0; i < pcm.length; i++) en += pcm[i] * pcm[i];
+    en = Math.sqrt(en / pcm.length);
+    this.smoothE = (this.smoothE || 0) * 0.88 + en * 0.12;
+    const thr = Math.max(0.012, this.smoothE * 1.9);
+    const now = en > thr;
+
+    if (now && !this.inSpeech) {
+      this.inSpeech = true;
+      this.speechStart = ts;
+    } else if (!now && this.inSpeech) {
+      this.inSpeech = false;
+      const dur = ts - this.speechStart;
+      if (dur >= 0.18) {
+        segs.push({ start: this.speechStart, end: ts });
+        if (segs.length > 200) segs.shift();
+        
+        // Coarse Sweep logic: Try to find massive offsets if we have enough segments
+        if (!hasPerformedCoarseSweep && segs.length >= 12) {
+            performCoarseSweep();
+        } else if (segs.length >= 8) {
+            tryMatch();
+        }
       }
     }
   }
 };
 
-function tryMatch(){
-  const nowTime = Date.now();
-  if(nowTime - lastMatchTime < 3000) return; // Throttling (Issue 5)
-  lastMatchTime = nowTime;
-
-  if(!subGaps.length||segs.length<8)return;
-  const ag=[];for(let i=1;i<segs.length;i++)ag.push(segs[i].start-segs[i-1].end);
-  const win=Math.min(40,Math.min(ag.length,subGaps.length));
-  if(win<6)return;
-  const aw=ag.slice(-win);
-  let bestCost=Infinity,bestOff=0;
-  for(let off=0;off<=subGaps.length-win;off++){
-    const r=dtw(aw,subGaps.slice(off,off+win));
-    if(r<bestCost){bestCost=r;bestOff=off;}
+function generateSignatures(gaps) {
+  const sigs = [];
+  for (let i = 0; i <= gaps.length - 6; i++) {
+    const block = gaps.slice(i, i + 6);
+    sigs.push({
+      index: i,
+      shape: normalizeRhythm(block),
+      complexity: calculateComplexity(block)
+    });
   }
-  const avg=bestCost/win,mr=Math.max(0,1-avg/2);
-  const cands=[];
-  if(mr>0.6){
-    for(let i=0;i<Math.min(6,win);i++){
-      const si=segs.length-win+i;
-      if(si>=0)cands.push({subGapIndex:bestOff+i,audioTime:(segs[si].start+segs[si].end)/2,source:'auto'});
-    }
-  }
-  self.postMessage({type:'match',confidence:mr,avgRelativeError:avg,bestOffset:bestOff,candidateAnchors:cands});
+  return sigs;
 }
 
-function dtw(a,b){
-  try {
-    const n=a.length,m=b.length;
-    // Increased band (Issue 13)
-    const band=Math.max(5,Math.floor(Math.max(n,m)*0.4));
-    const INF=1e9;
-    const dp=Array.from({length:n+1},()=>new Float32Array(m+1).fill(INF));
-    dp[0][0]=0;
-    for(let i=1;i<=n;i++){
-      for(let j=Math.max(1,i-band);j<=Math.min(m,i+band);j++){
-        const c=Math.abs(Math.log((a[i-1]||0.001))-Math.log((b[j-1]||0.001)));
-        dp[i][j]=c+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
-      }
+function normalizeRhythm(block) {
+  const sum = block.reduce((a, b) => a + b, 0);
+  if (sum === 0) return block.map(() => 0);
+  return block.map(v => v / sum);
+}
+
+function calculateComplexity(block) {
+  const avg = block.reduce((a, b) => a + b, 0) / block.length;
+  return block.reduce((a, b) => a + Math.abs(b - avg), 0);
+}
+
+/**
+ * Coarse Sweep: Searches a massive +/- 60s window to find initial sync
+ */
+function performCoarseSweep() {
+    const audioGaps = [];
+    for (let i = 1; i < segs.length; i++) audioGaps.push(segs[i].start - segs[i - 1].end);
+    if (audioGaps.length < 10) return;
+
+    const currentAudioSig = normalizeRhythm(audioGaps.slice(-10));
+    let bestMatch = null;
+    let minDiff = 1/0;
+
+    // Sweep all signatures
+    for (const sig of cadenceSignatures) {
+        if (sig.complexity < 0.8) continue;
+        // Compare larger 10-gap block for coarse accuracy
+        let diff = 0;
+        const subBlock = subGaps.slice(sig.index, sig.index + 10);
+        if (subBlock.length < 10) continue;
+        const subSig = normalizeRhythm(subBlock);
+        
+        for (let j = 0; j < 10; j++) diff += Math.abs(currentAudioSig[j] - subSig[j]);
+        
+        if (diff < minDiff) {
+            minDiff = diff;
+            bestMatch = sig;
+        }
     }
-    if (!isFinite(dp[n][m])) return INF;
-    return dp[n][m];
-  } catch(e) {
-    self.postMessage({type:'error', message: e.toString()});
-    return 1e9;
+
+    if (bestMatch && minDiff < 0.2) {
+        hasPerformedCoarseSweep = true;
+        const cands = [{
+            subGapIndex: bestMatch.index + 5,
+            audioTime: (segs[segs.length - 5].start + segs[segs.length - 5].end) / 2,
+            source: 'auto'
+        }];
+        self.postMessage({ type: 'match', confidence: 0.95, isCoarse: true, candidateAnchors: cands });
+    }
+}
+
+function tryMatch() {
+  const nowTime = Date.now();
+  if (nowTime - lastMatchTime < 2500) return; 
+
+  const audioGaps = [];
+  for (let i = 1; i < segs.length; i++) audioGaps.push(segs[i].start - segs[i - 1].end);
+  
+  if (audioGaps.length < 6) return;
+  const currentAudioSig = normalizeRhythm(audioGaps.slice(-6));
+  const complexity = calculateComplexity(audioGaps.slice(-6));
+  
+  if (complexity < 0.5) return;
+
+  let bestMatch = null;
+  let minDiff = 1/0;
+
+  for (const sig of cadenceSignatures) {
+    let diff = 0;
+    for (let j = 0; j < 6; j++) diff += Math.abs(currentAudioSig[j] - sig.shape[j]);
+    if (diff < minDiff) { minDiff = diff; bestMatch = sig; }
+  }
+
+  if (bestMatch && minDiff < 0.15) {
+    lastMatchTime = nowTime;
+    const confidence = Math.max(0, 1 - minDiff * 4);
+    const cands = [{
+      subGapIndex: bestMatch.index + 3, 
+      audioTime: (segs[segs.length - 3].start + segs[segs.length - 3].end) / 2,
+      source: 'auto'
+    }];
+    self.postMessage({ type: 'match', confidence: confidence, candidateAnchors: cands });
   }
 }
 `;

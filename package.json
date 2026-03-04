@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --outfile=dist/subtitle.plugin.js --minify",
-    "dev": "esbuild src/main.js --bundle --outfile=dist/subtitle.plugin.js --watch",
+    "build": "esbuild src/main.js --bundle --outfile=dist/subtitle.plugin.js --minify --banner:js=\"/*\n * @name SubtitleCorrector\n * @description Real-time audio-gap subtitle sync with iOS 26 Liquid Glass UI\n * @version 3.2.0\n * @author Vedant\n */\"",
+    "dev": "esbuild src/main.js --bundle --outfile=dist/subtitle.plugin.js --watch --banner:js=\"/*\n * @name SubtitleCorrector\n * @description Real-time audio-gap subtitle sync with iOS 26 Liquid Glass UI\n * @version 3.2.0\n * @author Vedant\n */\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

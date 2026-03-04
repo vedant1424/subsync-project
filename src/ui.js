@@ -104,24 +104,10 @@ export function showGhostPreview(state) {
 
   const idx = state.selectedCueIndex;
   const cues = state.mappedCues.length ? state.mappedCues : state.originalCues;
+  const predOffset = state.video.currentTime - (cues[idx].start + cues[idx].end) / 2;
+  const active = cues.filter(c => c.start + predOffset <= state.video.currentTime && c.end + predOffset > state.video.currentTime);
 
-  // Issue 9: Predict where CURRENT audio time is relative to selected cue
-  // This helps user see "if I set anchor here, what will show up"
-  // We use the current mapping (cues) to ensure drift/scale is accounted for
-  const predOffset =
-    state.video.currentTime -
-    (cues[idx].start + cues[idx].end) / 2;
-
-  const active = cues.filter(
-    (c) =>
-      c.start + predOffset <= state.video.currentTime &&
-      c.end + predOffset > state.video.currentTime
-  );
-
-  state.ghostOverlay.innerHTML = active
-    .map((c) => `<div>${escapeHtml(c.text)}</div>`)
-    .join("");
-    
+  state.ghostOverlay.innerHTML = active.map(c => `<div>${escapeHtml(c.text)}</div>`).join("");
   state.ghostOverlay.style.cssText += `
     display: ${active.length ? "block" : "none"};
     color: rgba(255, 255, 255, 0.4);
@@ -143,46 +129,27 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
   }
   state.selectedCueIndex = nearestIdx;
 
-  const offMs = Math.round(state.globalB * 1000);
-  const sign = offMs >= 0 ? "+" : "";
-
   state.cylinderBackdrop = document.createElement("div");
   state.cylinderBackdrop.style.cssText = `
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    backdrop-filter: blur(4px);
-    z-index: 2147483648;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    transition: opacity 0.28s ease;
+    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(4px);
+    z-index: 2147483648; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.28s ease;
   `;
 
   state.cylinderUI = document.createElement("div");
   state.cylinderUI.style.cssText = `
-    background: ${COLORS.sheetBackground};
-    backdrop-filter: blur(60px) saturate(200%);
-    -webkit-backdrop-filter: blur(60px) saturate(200%);
-    border-radius: 20px;
-    width: 480px;
-    max-width: 92vw;
-    padding: 24px;
-    color: ${COLORS.textPrimary};
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: ${COLORS.sheetBackground}; backdrop-filter: blur(60px) saturate(200%);
+    border-radius: 20px; width: 480px; max-height: 85vh; padding: 24px; color: ${COLORS.textPrimary};
+    display: flex; flex-direction: column; gap: 16px; border: 1px solid rgba(255, 255, 255, 0.18);
     box-shadow: 0 24px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.2);
-    font-family: ${FONTS.system};
-    transform: scale(0.96);
-    transition: transform 0.28s cubic-bezier(0.34, 1.2, 0.64, 1);
+    font-family: ${FONTS.system}; transform: scale(0.96); transition: transform 0.28s cubic-bezier(0.34, 1.2, 0.64, 1);
   `;
+
+  const offMs = Math.round(state.globalB * 1000);
+  const sign = offMs >= 0 ? "+" : "";
 
   state.cylinderUI.innerHTML = `
     <div style="text-align: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 16px;">
-      <div style="font-size: 15px; font-weight: 600; color: ${COLORS.textPrimary}; letter-spacing: 0.02em;">Subtitle Sync</div>
+      <div style="font-size: 15px; font-weight: 600; letter-spacing: 0.02em;">Subtitle Sync</div>
       <div style="font-size: 12px; color: ${COLORS.textSecondary}; margin-top: 6px;">
         Offset <span style="color:rgba(255,255,255,0.75)">${sign}${offMs}ms</span>
         &nbsp;·&nbsp; Scale <span style="color:rgba(255,255,255,0.75)">${state.globalA.toFixed(4)}</span>
@@ -190,9 +157,11 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
       </div>
     </div>
     
-    <div style="font-size: 12px; color: ${COLORS.textSecondary}; text-align: center; line-height: 1.7;">
-      Find the subtitle line you can <span style="color: rgba(255,255,255,0.75); font-weight: 500;">currently hear</span>.<br>
-      Click to select, then press Set Anchor.
+    <div style="position: relative;">
+      <input id="scp-search" type="text" placeholder="Search for dialogue..." style="
+        width: 100%; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 10px; padding: 8px 12px; color: white; font-family: ${FONTS.system}; font-size: 13px; outline: none;
+      ">
     </div>
 
     <div id="scp-scroll" style="flex: 1; overflow-y: auto; max-height: 340px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; scroll-snap-type: y mandatory; scrollbar-width: none;"></div>
@@ -215,10 +184,11 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
   document.body.appendChild(state.cylinderBackdrop);
 
   const scroll = state.cylinderUI.querySelector("#scp-scroll");
+  const searchInput = state.cylinderUI.querySelector("#scp-search");
   
   const updateSelectionUI = (newIdx) => {
     state.selectedCueIndex = newIdx;
-    scroll.querySelectorAll("[data-idx]").forEach((x) => {
+    scroll.querySelectorAll(".scp-row").forEach((x) => {
       const isSel = parseInt(x.dataset.idx, 10) === newIdx;
       x.style.background = isSel ? "rgba(10, 132, 255, 0.18)" : "transparent";
       x.style.border = isSel ? "1px solid rgba(10, 132, 255, 0.4)" : "none";
@@ -229,58 +199,49 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
     showGhostPreview(state);
   };
 
-  state.originalCues.forEach((cue, i) => {
-    const el = document.createElement("div");
-    el.dataset.idx = String(i);
-    el.className = "scp-row";
-    el.style.cssText = "padding: 10px 14px; border-radius: 10px; cursor: pointer; transition: background 0.15s ease; scroll-snap-align: start;";
-    el.innerHTML = `
-      <div class="scp-ts" style="font-family: ${FONTS.mono}; font-size: 10px; margin-bottom: 2px;">${formatTime(cue.start)}</div>
-      <div class="scp-txt" style="font-size: 12px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(cue.text.substring(0, 90))}</div>
-    `;
-    el.addEventListener("click", () => updateSelectionUI(i));
-    el.addEventListener("mouseenter", () => {
-        if (state.selectedCueIndex !== i) el.style.background = "rgba(255,255,255,0.06)";
+  const renderList = (filter = "") => {
+    scroll.innerHTML = "";
+    state.originalCues.forEach((cue, i) => {
+      if (filter && !cue.text.toLowerCase().includes(filter.toLowerCase())) return;
+      const el = document.createElement("div");
+      el.dataset.idx = String(i);
+      el.className = "scp-row";
+      el.style.cssText = "padding: 10px 14px; border-radius: 10px; cursor: pointer; transition: background 0.15s ease; scroll-snap-align: start;";
+      el.innerHTML = `
+        <div class="scp-ts" style="font-family: ${FONTS.mono}; font-size: 10px; margin-bottom: 2px;">${formatTime(cue.start)}</div>
+        <div class="scp-txt" style="font-size: 12px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(cue.text.substring(0, 90))}</div>
+      `;
+      el.addEventListener("click", () => updateSelectionUI(i));
+      scroll.appendChild(el);
     });
-    el.addEventListener("mouseleave", () => {
-        if (state.selectedCueIndex !== i) el.style.background = "transparent";
-    });
-    scroll.appendChild(el);
-  });
-
-  updateSelectionUI(state.selectedCueIndex);
-
-  // Animations
-  requestAnimationFrame(() => {
-    state.cylinderBackdrop.style.opacity = "1";
-    state.cylinderUI.style.transform = "scale(1)";
-  });
-
-  // Controls
-  const setupBtn = (id, action) => {
-      const btn = state.cylinderUI.querySelector(`#${id}`);
-      btn.onmousedown = () => btn.style.transform = "scale(0.97)";
-      btn.onmouseup = () => btn.style.transform = "scale(1)";
-      btn.onclick = action;
+    updateSelectionUI(state.selectedCueIndex);
   };
 
+  searchInput.addEventListener("input", (e) => renderList(e.target.value));
+  renderList();
+
+  // Controls & Animations
+  requestAnimationFrame(() => { state.cylinderBackdrop.style.opacity = "1"; state.cylinderUI.style.transform = "scale(1)"; });
+  const setupBtn = (id, action) => {
+      const btn = state.cylinderUI.querySelector(`#${id}`);
+      btn.onclick = action;
+      btn.onmousedown = () => btn.style.transform = "scale(0.97)";
+      btn.onmouseup = () => btn.style.transform = "scale(1)";
+  };
   setupBtn("scp-set", () => onSetAnchor(state.selectedCueIndex));
   setupBtn("scp-undo", onUndo);
   setupBtn("scp-close", onHideUI);
 
-  // Toggle switch logic
   state.cylinderUI.querySelector("#scp-drift-row").onclick = () => {
       state.driftEnabled = !state.driftEnabled;
-      const track = state.cylinderUI.querySelector("#scp-toggle");
-      const thumb = state.cylinderUI.querySelector("#scp-thumb");
-      track.style.background = state.driftEnabled ? COLORS.accent : "rgba(255,255,255,0.15)";
-      thumb.style.transform = `translateX(${state.driftEnabled ? "12px" : "0px"})`;
+      state.cylinderUI.querySelector("#scp-toggle").style.background = state.driftEnabled ? COLORS.accent : "rgba(255,255,255,0.15)";
+      state.cylinderUI.querySelector("#scp-thumb").style.transform = `translateX(${state.driftEnabled ? "12px" : "0px"})`;
       updateStatus(state, state.driftEnabled ? "Auto-drift: ON" : "Auto-drift: OFF");
   };
 
-  // Keyboard
   const handleKey = (e) => {
     if (e.key === "Escape") onHideUI();
+    if (e.target === searchInput) return;
     if (e.key === "ArrowDown") { e.preventDefault(); updateSelectionUI(Math.min(state.originalCues.length - 1, state.selectedCueIndex + 1)); }
     if (e.key === "ArrowUp") { e.preventDefault(); updateSelectionUI(Math.max(0, state.selectedCueIndex - 1)); }
     if (e.key === "Enter") { e.preventDefault(); onSetAnchor(state.selectedCueIndex); }
@@ -290,16 +251,7 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
     state.cylinderBackdrop.addEventListener(ev, (e) => {
       if (ev === "keydown") handleKey(e);
       if (e.target === state.cylinderBackdrop && ev === "mousedown") onHideUI();
-      e.stopImmediatePropagation();
+      if (e.target !== searchInput) e.stopImmediatePropagation();
     }, { capture: true })
   );
-
-  if (state.video) {
-    const syncToTime = () => {
-      if (!state.cylinderUI) return;
-      const nearest = findCueIndexAt(state.originalCues, state.video.currentTime);
-      if (nearest !== -1 && nearest !== state.selectedCueIndex) updateSelectionUI(nearest);
-    };
-    state.video.addEventListener("timeupdate", syncToTime, { signal: state.controller.signal });
-  }
 }
