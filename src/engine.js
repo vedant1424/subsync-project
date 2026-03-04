@@ -16,24 +16,32 @@ export class SubtitleEngine {
     let html = "";
     
     if (idx !== -1) {
-      // Issue: Liquid Glass Subtitle Styling
-      // Pill-shaped glass backing behind active lines
       html = `
-        <div style="
-          background: rgba(0, 0, 0, 0.35);
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
-          border-radius: 8px;
-          padding: 4px 12px;
-          color: #fff;
-          font-size: min(3.2vw, 32px);
-          line-height: 1.4;
-          font-family: -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif;
-          font-weight: 500;
-          text-shadow: 0 0 8px #000, 1px 1px 3px #000;
-          display: inline-block;
-        ">
-          ${escapeHtml(this.state.mappedCues[idx].text)}
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+          <div style="
+            font-size: 9px; 
+            color: rgba(10, 132, 255, 0.8); 
+            font-weight: 600; 
+            text-transform: uppercase; 
+            letter-spacing: 0.1em;
+            font-family: -apple-system, system-ui, sans-serif;
+          ">SubSync Active</div>
+          <div style="
+            background: rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-radius: 8px;
+            padding: 4px 12px;
+            color: #fff;
+            font-size: min(3.2vw, 32px);
+            line-height: 1.4;
+            font-family: -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+            font-weight: 500;
+            text-shadow: 0 0 8px #000, 1px 1px 3px #000;
+            display: inline-block;
+          ">
+            ${escapeHtml(this.state.mappedCues[idx].text)}
+          </div>
         </div>
       `;
     }
@@ -118,5 +126,70 @@ export class SubtitleEngine {
 
     this.rebuildMappedCues();
     if (this.state.video) this.scheduleCueRender(this.state.video.currentTime);
+  }
+
+  /* ══════════════════════════════════════════════
+     SMART SNAP ENGINE (Phase 2)
+  ══════════════════════════════════════════════ */
+  
+  /**
+   * Finds the best speech segment in history relative to a target time.
+   * Prioritizes segments that just ended or are currently active.
+   */
+  findSnapSegment(targetTime) {
+    if (!this.state.vadHistory.length) return null;
+    
+    // 1. Check if we are currently inside a speech segment
+    const current = this.state.vadHistory.find(s => targetTime >= s.start && targetTime <= s.end);
+    if (current) return current;
+
+    // 2. Find the segment that ended most recently before targetTime
+    // (User usually clicks right after hearing the start or end of a line)
+    let best = null;
+    let minDiff = 1/0;
+
+    for (const seg of this.state.vadHistory) {
+        // We look for segments that ended within 3 seconds of the click
+        const diff = Math.abs(targetTime - seg.end);
+        if (diff < 3 && diff < minDiff) {
+            minDiff = diff;
+            best = seg;
+        }
+    }
+    
+    return best;
+  }
+
+  /**
+   * Automatically aligns a subtitle cue to the detected audio rhythm.
+   */
+  smartSnapCue(idx) {
+    if (!this.state.originalCues[idx] || !this.state.video) return false;
+    
+    const targetTime = this.state.video.currentTime;
+    const segment = this.findSnapSegment(targetTime);
+    
+    // If no clear audio segment is found in history, fallback to current time
+    const audioAnchor = segment ? (segment.start + segment.end) / 2 : targetTime;
+    const subCenter = (this.state.originalCues[idx].start + this.state.originalCues[idx].end) / 2;
+
+    // Add as a user anchor
+    this.state.anchors.push({
+      subtitleIndex: idx,
+      subtitleCenter: subCenter,
+      audioTime: audioAnchor,
+      confidence: segment ? 1.0 : 0.5,
+      source: "user"
+    });
+
+    // Limit to 3 manual anchors to keep math stable and responsive
+    if (this.state.anchors.length > 3) {
+        this.state.anchors = this.state.anchors.filter(a => a.source !== 'user').concat(
+            this.state.anchors.filter(a => a.source === 'user').slice(-3)
+        );
+    }
+
+    this.applyMapping(this.state.anchors);
+    return !!segment; // Returns true if it was a 'Smart Snap' to audio
   }
 }

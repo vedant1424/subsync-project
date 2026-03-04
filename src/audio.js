@@ -27,10 +27,14 @@ self.onmessage = function(e) {
       this.inSpeech = false;
       const dur = ts - this.speechStart;
       if (dur >= 0.18) {
-        segs.push({ start: this.speechStart, end: ts });
+        const seg = { start: this.speechStart, end: ts };
+        segs.push(seg);
         if (segs.length > 200) segs.shift();
         
-        // Coarse Sweep logic: Try to find massive offsets if we have enough segments
+        // Phase 1: Report every segment to the main thread for the 'Smart Snap' history
+        self.postMessage({ type: 'segment', segment: seg });
+
+        // Coarse Sweep logic
         if (!hasPerformedCoarseSweep && segs.length >= 12) {
             performCoarseSweep();
         } else if (segs.length >= 8) {

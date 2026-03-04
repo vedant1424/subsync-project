@@ -26,32 +26,15 @@ export function createStatusBadge(state, onShowUI) {
   state.statusBadge = document.createElement("div");
   state.statusBadge.id = "subsync-badge";
   state.statusBadge.style.cssText = `
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    padding: 6px 14px;
-    border-radius: 100px;
-    font-family: ${FONTS.system};
-    font-size: 12px;
-    color: ${COLORS.textPrimary};
-    z-index: 2147483646;
-    cursor: pointer;
-    transition: opacity 0.4s ease, transform 0.2s ease;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    ${GLASS_STYLE}
+    position: fixed; top: 16px; right: 16px; padding: 6px 14px; border-radius: 100px;
+    font-family: ${FONTS.system}; font-size: 12px; color: ${COLORS.textPrimary};
+    z-index: 2147483646; cursor: pointer; transition: opacity 0.4s ease, transform 0.2s ease;
+    display: flex; align-items: center; gap: 8px; ${GLASS_STYLE}
   `;
   
   const dot = document.createElement("span");
   dot.id = "subsync-dot";
-  dot.style.cssText = `
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.3);
-    transition: background 0.3s ease;
-  `;
+  dot.style.cssText = `width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.3); transition: background 0.3s ease;`;
   
   const text = document.createElement("span");
   text.textContent = "SubSync";
@@ -72,9 +55,7 @@ export function createStatusBadge(state, onShowUI) {
   });
   state.statusBadge.addEventListener("mouseleave", () => {
     state.statusBadge.style.transform = "translateY(0)";
-    state.badgeDimTimer = setTimeout(() => {
-      state.statusBadge.style.opacity = "0.7";
-    }, 2000);
+    state.badgeDimTimer = setTimeout(() => { state.statusBadge.style.opacity = "0.7"; }, 2000);
   });
 }
 
@@ -82,17 +63,12 @@ export function updateStatus(state, msg) {
   if (!state.statusBadge) return;
   const text = state.statusBadge.querySelector("span:last-child");
   const dot = state.statusBadge.querySelector("#subsync-dot");
-  
   text.textContent = msg;
   state.statusBadge.style.opacity = "1";
   dot.style.background = COLORS.accent;
-  
   clearTimeout(state.badgeDimTimer);
   state.badgeDimTimer = setTimeout(() => {
-    if (state.statusBadge) {
-      state.statusBadge.style.opacity = "0.7";
-      dot.style.background = "rgba(255,255,255,0.3)";
-    }
+    if (state.statusBadge) { state.statusBadge.style.opacity = "0.7"; dot.style.background = "rgba(255,255,255,0.3)"; }
   }, 5000);
 }
 
@@ -101,21 +77,15 @@ export function showGhostPreview(state) {
     if (state.ghostOverlay) state.ghostOverlay.style.display = "none";
     return;
   }
-
   const idx = state.selectedCueIndex;
   const cues = state.mappedCues.length ? state.mappedCues : state.originalCues;
   const predOffset = state.video.currentTime - (cues[idx].start + cues[idx].end) / 2;
   const active = cues.filter(c => c.start + predOffset <= state.video.currentTime && c.end + predOffset > state.video.currentTime);
-
   state.ghostOverlay.innerHTML = active.map(c => `<div>${escapeHtml(c.text)}</div>`).join("");
-  state.ghostOverlay.style.cssText += `
-    display: ${active.length ? "block" : "none"};
-    color: rgba(255, 255, 255, 0.4);
-    font-family: ${FONTS.system};
-  `;
+  state.ghostOverlay.style.cssText += `display: ${active.length ? "block" : "none"}; color: rgba(255, 255, 255, 0.4); font-family: ${FONTS.system};`;
 }
 
-export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
+export function showCylinderUI(state, engine, onSmartSnap, onUndo, onHideUI) {
   if (state.cylinderUI) return;
 
   const t = state.video?.currentTime || 0;
@@ -130,19 +100,10 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
   state.selectedCueIndex = nearestIdx;
 
   state.cylinderBackdrop = document.createElement("div");
-  state.cylinderBackdrop.style.cssText = `
-    position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(4px);
-    z-index: 2147483648; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.28s ease;
-  `;
+  state.cylinderBackdrop.style.cssText = `position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(4px); z-index: 2147483648; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.28s ease;`;
 
   state.cylinderUI = document.createElement("div");
-  state.cylinderUI.style.cssText = `
-    background: ${COLORS.sheetBackground}; backdrop-filter: blur(60px) saturate(200%);
-    border-radius: 20px; width: 480px; max-height: 85vh; padding: 24px; color: ${COLORS.textPrimary};
-    display: flex; flex-direction: column; gap: 16px; border: 1px solid rgba(255, 255, 255, 0.18);
-    box-shadow: 0 24px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.2);
-    font-family: ${FONTS.system}; transform: scale(0.96); transition: transform 0.28s cubic-bezier(0.34, 1.2, 0.64, 1);
-  `;
+  state.cylinderUI.style.cssText = `background: ${COLORS.sheetBackground}; backdrop-filter: blur(60px) saturate(200%); border-radius: 20px; width: 480px; max-height: 85vh; padding: 24px; color: ${COLORS.textPrimary}; display: flex; flex-direction: column; gap: 16px; border: 1px solid rgba(255, 255, 255, 0.18); box-shadow: 0 24px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.2); font-family: ${FONTS.system}; transform: scale(0.96); transition: transform 0.28s cubic-bezier(0.34, 1.2, 0.64, 1);`;
 
   const offMs = Math.round(state.globalB * 1000);
   const sign = offMs >= 0 ? "+" : "";
@@ -153,22 +114,17 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
       <div style="font-size: 12px; color: ${COLORS.textSecondary}; margin-top: 6px;">
         Offset <span style="color:rgba(255,255,255,0.75)">${sign}${offMs}ms</span>
         &nbsp;·&nbsp; Scale <span style="color:rgba(255,255,255,0.75)">${state.globalA.toFixed(4)}</span>
-        &nbsp;·&nbsp; Anchors <span style="color:rgba(255,255,255,0.75)">${state.anchors.filter(a => a.source === "user").length}</span>
       </div>
     </div>
     
     <div style="position: relative;">
-      <input id="scp-search" type="text" placeholder="Search for dialogue..." style="
-        width: 100%; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 10px; padding: 8px 12px; color: white; font-family: ${FONTS.system}; font-size: 13px; outline: none;
-      ">
+      <input id="scp-search" type="text" placeholder="Click any line to sync instantly..." style="width: 100%; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 10px 12px; color: white; font-family: ${FONTS.system}; font-size: 13px; outline: none;">
     </div>
 
     <div id="scp-scroll" style="flex: 1; overflow-y: auto; max-height: 340px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; scroll-snap-type: y mandatory; scrollbar-width: none;"></div>
 
-    <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px;">
-      <button id="scp-set" style="padding: 12px; background: rgba(10, 132, 255, 0.85); border: 1px solid ${COLORS.accent}; border-radius: 12px; color: white; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; box-shadow: 0 4px 16px rgba(10, 132, 255, 0.35);">Set Anchor</button>
-      <button id="scp-undo" style="padding: 12px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: rgba(255,255,255,0.6); font-size: 13px; cursor: pointer; transition: all 0.15s ease;">Undo</button>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+      <button id="scp-undo" style="padding: 12px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: rgba(255,255,255,0.6); font-size: 13px; cursor: pointer; transition: all 0.15s ease;">Undo last sync</button>
       <button id="scp-close" style="padding: 12px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: rgba(255,255,255,0.6); font-size: 13px; cursor: pointer; transition: all 0.15s ease;">Close</button>
     </div>
 
@@ -176,7 +132,7 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
       <div id="scp-toggle" style="width: 32px; height: 20px; border-radius: 100px; background: ${state.driftEnabled ? COLORS.accent : "rgba(255,255,255,0.15)"}; position: relative; transition: background 0.2s ease;">
         <div id="scp-thumb" style="width: 16px; height: 16px; border-radius: 50%; background: white; position: absolute; top: 2px; left: 2px; transition: transform 0.2s ease; transform: translateX(${state.driftEnabled ? "12px" : "0px"}); box-shadow: 0 1px 4px rgba(0,0,0,0.3);"></div>
       </div>
-      <span style="font-size: 12px; color: ${COLORS.textSecondary};">Auto-drift correction</span>
+      <span style="font-size: 12px; color: ${COLORS.textSecondary};">Continuous auto-drift correction</span>
     </div>
   `;
 
@@ -211,7 +167,11 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
         <div class="scp-ts" style="font-family: ${FONTS.mono}; font-size: 10px; margin-bottom: 2px;">${formatTime(cue.start)}</div>
         <div class="scp-txt" style="font-size: 12px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(cue.text.substring(0, 90))}</div>
       `;
-      el.addEventListener("click", () => updateSelectionUI(i));
+      // Magic: Clicking a line triggers instant Smart Snap
+      el.addEventListener("click", () => {
+          onSmartSnap(i);
+          onHideUI(); 
+      });
       scroll.appendChild(el);
     });
     updateSelectionUI(state.selectedCueIndex);
@@ -220,15 +180,14 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
   searchInput.addEventListener("input", (e) => renderList(e.target.value));
   renderList();
 
-  // Controls & Animations
   requestAnimationFrame(() => { state.cylinderBackdrop.style.opacity = "1"; state.cylinderUI.style.transform = "scale(1)"; });
+  
   const setupBtn = (id, action) => {
       const btn = state.cylinderUI.querySelector(`#${id}`);
       btn.onclick = action;
       btn.onmousedown = () => btn.style.transform = "scale(0.97)";
       btn.onmouseup = () => btn.style.transform = "scale(1)";
   };
-  setupBtn("scp-set", () => onSetAnchor(state.selectedCueIndex));
   setupBtn("scp-undo", onUndo);
   setupBtn("scp-close", onHideUI);
 
@@ -241,10 +200,16 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
 
   const handleKey = (e) => {
     if (e.key === "Escape") onHideUI();
-    if (e.target === searchInput) return;
+    if (e.target === searchInput) {
+        if (e.key === "Enter" && scroll.firstChild) {
+            onSmartSnap(parseInt(scroll.firstChild.dataset.idx, 10));
+            onHideUI();
+        }
+        return;
+    }
     if (e.key === "ArrowDown") { e.preventDefault(); updateSelectionUI(Math.min(state.originalCues.length - 1, state.selectedCueIndex + 1)); }
     if (e.key === "ArrowUp") { e.preventDefault(); updateSelectionUI(Math.max(0, state.selectedCueIndex - 1)); }
-    if (e.key === "Enter") { e.preventDefault(); onSetAnchor(state.selectedCueIndex); }
+    if (e.key === "Enter") { e.preventDefault(); onSmartSnap(state.selectedCueIndex); onHideUI(); }
   };
 
   ["wheel", "keydown", "mousedown", "touchstart"].forEach((ev) =>
