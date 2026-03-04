@@ -4,10 +4,10 @@ import { installInterceptors } from './interceptor.js';
 import { createWorker, initAudioCapture } from './audio.js';
 import { validateCues, hashCues, formatTime } from './utils.js';
 
-console.log("[SubSync v3.3] Initializing...");
+console.log("[SubSync v3.3] Initializing Floating Toggle...");
 
 const state = {
-  isEnabled: localStorage.getItem('subsync_enabled') !== 'false', // Default to true
+  isEnabled: localStorage.getItem('subsync_enabled') !== 'false',
   video: null,
   customOverlay: null,
   ghostOverlay: null,
@@ -48,59 +48,77 @@ const state = {
 const engine = new SubtitleEngine(state);
 
 /* ══════════════════════════════════════════════
-   VISIBILITY & TOGGLE (NEW)
+   FLOATING OVERLAY TOGGLE
 ══════════════════════════════════════════════ */
 function updatePluginState() {
+    const toggle = document.getElementById("subsync-floating-toggle");
     if (!state.isEnabled) {
         if (state.statusBadge) state.statusBadge.style.display = "none";
-        if (state.customOverlay) state.customOverlay.style.display = "none";
+        if (state.customOverlay) state.customOverlay.innerHTML = "";
+        if (toggle) toggle.style.opacity = "0.4";
         showNativeSubtitles();
         if (state.vadWorker) state.vadWorker.terminate();
         state.vadWorker = null;
     } else {
         if (state.statusBadge) state.statusBadge.style.display = "flex";
-        if (state.customOverlay) state.customOverlay.style.display = "flex";
+        if (toggle) toggle.style.opacity = "1";
         if (state.originalCues.length) hideNativeSubtitles();
     }
 }
 
-function injectToggleIntoPlayer() {
-    // Only inject if we are in the player and button doesn't exist
-    if (document.getElementById("subsync-player-toggle")) return;
-    
-    // Look for Stremio's control bar (usually right side where settings/fullscreen are)
-    const controls = document.querySelector('div[class*="extra-controls"]') || 
-                     document.querySelector('div[class*="right-controls"]') ||
-                     document.querySelector('.player-controls-container');
-    
-    if (!controls) return;
+function injectFloatingToggle() {
+    if (document.getElementById("subsync-floating-toggle")) return;
 
     const toggle = document.createElement("div");
-    toggle.id = "subsync-player-toggle";
+    toggle.id = "subsync-floating-toggle";
     toggle.title = "Toggle SubSync Plugin";
+    
+    // iOS Liquid Glass Style
     toggle.style.cssText = `
-        cursor: pointer; width: 24px; height: 24px; display: flex; align-items: center; 
-        justify-content: center; margin: 0 8px; transition: opacity 0.2s;
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.12);
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 2147483645;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         opacity: ${state.isEnabled ? "1" : "0.4"};
     `;
     
-    // Modern iOS-style icon (Circle with arrows)
-    toggle.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>`;
+    toggle.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" stroke="white" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>`;
     
     toggle.onclick = (e) => {
         e.stopPropagation();
         state.isEnabled = !state.isEnabled;
         localStorage.setItem('subsync_enabled', state.isEnabled);
-        toggle.style.opacity = state.isEnabled ? "1" : "0.4";
         updatePluginState();
-        updateStatus(state, state.isEnabled ? "SubSync Enabled" : "SubSync Disabled");
+        updateStatus(state, state.isEnabled ? "SubSync Active" : "SubSync Disabled");
     };
 
-    controls.insertBefore(toggle, controls.firstChild);
+    toggle.onmouseenter = () => {
+        toggle.style.transform = "scale(1.1)";
+        toggle.style.background = "rgba(255, 255, 255, 0.2)";
+    };
+    toggle.onmouseleave = () => {
+        toggle.style.transform = "scale(1)";
+        toggle.style.background = "rgba(255, 255, 255, 0.12)";
+    };
+
+    document.body.appendChild(toggle);
 }
 
 /* ══════════════════════════════════════════════
-   NATIVE SUBTITLE HIDE/SHOW
+   NATIVE SUBTITLE HIDE/SHOW (The Nuclear Option)
 ══════════════════════════════════════════════ */
 function injectNuclearStyles() {
   if (document.getElementById("subsync-nuclear-styles")) return;
@@ -143,7 +161,7 @@ function aggressiveHideNativeSubtitles() {
 }
 
 /* ══════════════════════════════════════════════
-   CUSTOM OVERLAY & PLAYER SETUP
+   PLAYER SETUP
 ══════════════════════════════════════════════ */
 function initCustomSubtitleRenderer() {
   if (state.customOverlay) state.customOverlay.remove();
@@ -162,7 +180,7 @@ function onVideoReady(v) {
   state.video = v;
   initAudioCapture(state.video, state);
   initCustomSubtitleRenderer();
-  injectToggleIntoPlayer();
+  injectFloatingToggle();
   if (state.pendingCues) { setupSubtitleSystem(state.pendingCues); state.pendingCues = null; }
   const resume = () => { if (state.isEnabled && state.audioCtx?.state === "suspended") state.audioCtx.resume(); };
   ["seeked", "playing"].forEach((ev) => v.addEventListener(ev, resume, { signal: state.controller.signal }));
@@ -173,7 +191,7 @@ function onVideoReady(v) {
 }
 
 /* ══════════════════════════════════════════════
-   REMAINDING LOGIC (Minified for brevity)
+   CORE LOGIC (Minified)
 ══════════════════════════════════════════════ */
 function setupSubtitleSystem(rawCues) {
   if (state.settingUp) return; state.settingUp = true;
@@ -256,11 +274,14 @@ state.videoPoller = setInterval(() => {
   const v = document.querySelector("video");
   if (v) {
       if (v !== state.video) onVideoReady(v);
-      injectToggleIntoPlayer();
+      injectFloatingToggle();
+      const toggle = document.getElementById("subsync-floating-toggle");
+      if (toggle) toggle.style.display = "flex";
   } else {
-      // Not in player context
       if (state.statusBadge) state.statusBadge.style.display = "none";
       if (state.customOverlay) state.customOverlay.style.display = "none";
+      const toggle = document.getElementById("subsync-floating-toggle");
+      if (toggle) toggle.style.display = "none";
   }
 }, 1000);
 
