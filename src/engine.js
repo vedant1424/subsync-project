@@ -5,19 +5,37 @@ export class SubtitleEngine {
     this.state = state;
   }
 
-  // Issue 6: Binary search for cue lookup
   getNextCueBoundary(t) {
     return findNextBoundary(this.state.mappedCues, t);
   }
 
-  // Issue 6: Binary search for active cue
   renderMappedCues(t) {
     if (!this.state.customOverlay) return;
     
     const idx = findCueIndexAt(this.state.mappedCues, t);
     let html = "";
+    
     if (idx !== -1) {
-      html = `<div>${escapeHtml(this.state.mappedCues[idx].text)}</div>`;
+      // Issue: Liquid Glass Subtitle Styling
+      // Pill-shaped glass backing behind active lines
+      html = `
+        <div style="
+          background: rgba(0, 0, 0, 0.35);
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          border-radius: 8px;
+          padding: 4px 12px;
+          color: #fff;
+          font-size: min(3.2vw, 32px);
+          line-height: 1.4;
+          font-family: -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+          font-weight: 500;
+          text-shadow: 0 0 8px #000, 1px 1px 3px #000;
+          display: inline-block;
+        ">
+          ${escapeHtml(this.state.mappedCues[idx].text)}
+        </div>
+      `;
     }
     
     if (this.state.customOverlay.innerHTML !== html) {
@@ -51,7 +69,6 @@ export class SubtitleEngine {
     return g;
   }
 
-  // Issue 10: FPS Normalization
   applyFPSNormalization(cues) {
     const ratio = detectFPS(cues);
     if (ratio === 1.0) return cues;
