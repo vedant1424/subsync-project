@@ -41,16 +41,12 @@ const state = {
   badgeDimTimer: null,
   videoPoller: null,
   lastFetchedCues: [],
-  lastConfidence: 0 // Issue 14
+  lastConfidence: 0
 };
 
 const engine = new SubtitleEngine(state);
 
-/* ══════════════════════════════════════════════
-   PERSISTENCE (Issue 11)
-══════════════════════════════════════════════ */
 function getStorageKey() {
-    // Basic hash of URL or title
     const id = window.location.href.split('?')[0].split('#')[0];
     return `subsync_anchors_${btoa(id).substring(0, 16)}`;
 }
@@ -72,7 +68,7 @@ function loadAnchors() {
         const saved = localStorage.getItem(getStorageKey());
         if (saved) {
             const data = JSON.parse(saved);
-            if (Date.now() - data.ts < 7 * 86400000) { // 7 days
+            if (Date.now() - data.ts < 7 * 86400000) {
                 state.anchors = data.anchors;
                 state.globalA = data.globalA;
                 state.globalB = data.globalB;
@@ -83,9 +79,6 @@ function loadAnchors() {
     return false;
 }
 
-/* ══════════════════════════════════════════════
-   NATIVE SUBTITLE HIDE/SHOW (Issue 7 optimization)
-══════════════════════════════════════════════ */
 function hideNativeSubtitles() {
   state.nativeSubtitleEl =
     document.querySelector(".player-subtitle-layer") ||
@@ -123,75 +116,45 @@ function aggressiveHideNativeSubtitles() {
   });
   state.subtitleObserver.observe(target, {
     childList: true,
-    subtree: target !== document.body // Issue 7 optimization
+    subtree: target !== document.body
   });
 }
 
-/* ══════════════════════════════════════════════
-   CUSTOM OVERLAY
-══════════════════════════════════════════════ */
 function initCustomSubtitleRenderer() {
   if (state.customOverlay) state.customOverlay.remove();
   if (state.ghostOverlay) state.ghostOverlay.remove();
 
   state.customOverlay = document.createElement("div");
   state.customOverlay.style.cssText = [
-    "position:fixed",
-    "bottom:9%",
-    "left:50%",
-    "transform:translateX(-50%)",
-    "text-align:center",
-    "z-index:2147483647",
-    "pointer-events:none",
-    "width:94%",
-    "max-width:94vw",
-    "color:#fff",
-    "font-size:min(3.2vw,32px)",
-    "line-height:1.4",
-    'font-family:"Segoe UI",Arial,sans-serif',
-    "font-weight:500",
-    "text-shadow:0 0 8px #000,1px 1px 3px #000,-1px -1px 3px #000"
+    "position:fixed","bottom:9%","left:50%","transform:translateX(-50%)",
+    "text-align:center","z-index:2147483647","pointer-events:none",
+    "width:94%","max-width:94vw","color:#fff","font-size:min(3.2vw,32px)",
+    "line-height:1.4",'font-family:"Segoe UI",Arial,sans-serif',
+    "font-weight:500","text-shadow:0 0 8px #000,1px 1px 3px #000,-1px -1px 3px #000"
   ].join(";");
   document.body.appendChild(state.customOverlay);
 
   state.ghostOverlay = document.createElement("div");
   state.ghostOverlay.style.cssText = [
-    "position:fixed",
-    "bottom:9%",
-    "left:50%",
-    "transform:translateX(-50%)",
-    "text-align:center",
-    "z-index:2147483644",
-    "pointer-events:none",
-    "width:94%",
-    "max-width:94vw",
-    "color:rgba(255,210,80,0.65)",
-    "font-size:min(3.2vw,32px)",
-    "line-height:1.4",
+    "position:fixed","bottom:9%","left:50%","transform:translateX(-50%)",
+    "text-align:center","z-index:2147483644","pointer-events:none",
+    "width:94%","max-width:94vw","color:rgba(255,210,80,0.65)",
+    "font-size:min(3.2vw,32px)","line-height:1.4",
     'font-family:"Segoe UI",Arial,sans-serif',
-    "text-shadow:0 0 8px #000",
-    "display:none"
+    "text-shadow:0 0 8px #000","display:none"
   ].join(";");
   document.body.appendChild(state.ghostOverlay);
 
   const reposition = () => {
-    const fs = !!document.fullscreenElement;
-    const b = fs ? "12%" : "9%";
+    const b = !!document.fullscreenElement ? "12%" : "9%";
     if (state.customOverlay) state.customOverlay.style.bottom = b;
     if (state.ghostOverlay) state.ghostOverlay.style.bottom = b;
   };
 
-  document.addEventListener("fullscreenchange", reposition, {
-    signal: state.controller.signal
-  });
-  window.addEventListener("resize", reposition, {
-    signal: state.controller.signal
-  });
+  document.addEventListener("fullscreenchange", reposition, { signal: state.controller.signal });
+  window.addEventListener("resize", reposition, { signal: state.controller.signal });
 }
 
-/* ══════════════════════════════════════════════
-   TRACK CHANGE WATCHER
-══════════════════════════════════════════════ */
 function initTrackChangeWatcher() {
   if (state.trackObserver) state.trackObserver.disconnect();
 
@@ -237,33 +200,24 @@ function checkSubtitleChange() {
   startCuePolling();
 }
 
-/* ══════════════════════════════════════════════
-   CORE ENGINE LOGIC
-══════════════════════════════════════════════ */
-
 function setupSubtitleSystem(rawCues) {
   if (state.settingUp) return;
   state.settingUp = true;
   try {
-    // Issue 10: Apply FPS normalization
     state.originalCues = engine.applyFPSNormalization(rawCues.map((c) => ({ ...c })));
-    
-    // Issue 8: Memory cleanup
-    state.lastFetchedCues = []; 
-    
+    state.lastFetchedCues = [];
     state.subtitleGapSequence = engine.computeSubtitleGapSequence(state.originalCues);
     state.anchors = [];
     state.globalA = 1.0;
     state.globalB = 0.0;
 
-    // Issue 11: Load persisted anchors
     if (loadAnchors()) {
         engine.rebuildMappedCues();
         updateStatus(state, "SubSync: Restored previous sync ✓");
     } else {
         state.mappedCues = state.originalCues.map((c) => ({ ...c }));
     }
-    
+
     if (state.vadWorker) state.vadWorker.terminate();
     state.vadWorker = createWorker();
     if (state.vadWorker) {
@@ -274,7 +228,7 @@ function setupSubtitleSystem(rawCues) {
     hideNativeSubtitles();
     aggressiveHideNativeSubtitles();
     if (state.video) engine.scheduleCueRender(state.video.currentTime);
-    
+
     if (state.anchors.length === 0) {
         updateStatus(state, `SubSync ✓ ${state.originalCues.length} cues loaded`);
     }
@@ -285,8 +239,6 @@ function setupSubtitleSystem(rawCues) {
 
 function handleWorkerMessage(e) {
   if (e.data.type !== "match" || !state.driftEnabled) return;
-  
-  // Issue 14: Progressive thresholds
   const conf = e.data.confidence;
   const resolved = (e.data.candidateAnchors || [])
     .filter((a) => a.subGapIndex < state.originalCues.length)
@@ -310,10 +262,6 @@ function handleWorkerMessage(e) {
   }
 }
 
-/* ══════════════════════════════════════════════
-   UI HANDLERS
-══════════════════════════════════════════════ */
-
 function handleShowUI() {
   showCylinderUI(state, engine, setUserAnchor, doUndo, hideCylinderUI);
 }
@@ -332,7 +280,7 @@ function setUserAnchor(idx) {
   });
 
   engine.applyMapping(state.anchors);
-  saveAnchors(); // Issue 11
+  saveAnchors();
   hideCylinderUI();
   updateStatus(state, `Anchor set @ ${formatTime(at)} → offset ${Math.round(state.globalB * 1000)}ms`);
 }
@@ -352,7 +300,7 @@ function doUndo() {
   } else {
     engine.applyMapping(state.anchors);
   }
-  saveAnchors(); // Issue 11
+  saveAnchors();
   updateStatus(state, "Last anchor removed");
   hideCylinderUI();
 }
@@ -363,10 +311,6 @@ function hideCylinderUI() {
   state.cylinderUI = null;
   state.cylinderBackdrop = null;
 }
-
-/* ══════════════════════════════════════════════
-   PLAYER INTEGRATION
-══════════════════════════════════════════════ */
 
 function onVideoReady(v) {
   if (state.video === v) return;
@@ -382,7 +326,7 @@ function onVideoReady(v) {
   initAudioCapture(state.video, state);
   initCustomSubtitleRenderer();
   initTrackChangeWatcher();
-  
+
   if (state.pendingCues) {
     setupSubtitleSystem(state.pendingCues);
     state.pendingCues = null;
@@ -398,7 +342,7 @@ function onVideoReady(v) {
 
   ["seeked", "playing", "waiting", "loadedmetadata"].forEach((ev) => v.addEventListener(ev, resume, { signal: state.controller.signal }));
   document.addEventListener("click", resume, { once: true, signal: state.controller.signal });
-  
+
   v.addEventListener("playing", () => engine.scheduleCueRender(v.currentTime), { signal: state.controller.signal });
   v.addEventListener("seeked", () => engine.scheduleCueRender(v.currentTime), { signal: state.controller.signal });
   v.addEventListener("pause", () => clearTimeout(state.nextCueTimeout), { signal: state.controller.signal });
@@ -408,7 +352,9 @@ function onVideoReady(v) {
 
 function startCuePolling() {
   if (state.cuePollingId) clearInterval(state.cuePollingId);
+  let _attempts = 0;
   state.cuePollingId = setInterval(() => {
+    _attempts++;
     const cues = getInternalCues();
     if (cues.length > 0) {
       const hash = hashCues(cues);
@@ -416,13 +362,23 @@ function startCuePolling() {
         state.lastCueHash = hash;
         setupSubtitleSystem(cues);
       }
+      return; // cues present — keep polling for track changes, skip feedback
+    }
+    // No cues yet — give user visibility for first 20 attempts (~16s)
+    if (_attempts <= 20) {
+      updateStatus(state, `SubSync: waiting for subs… (${_attempts})`);
+    }
+    // After ~2 min with no cues, stop and report
+    if (_attempts > 150 && !state.originalCues.length) {
+      clearInterval(state.cuePollingId);
+      state.cuePollingId = null;
+      updateStatus(state, "SubSync: no subs found — click badge after loading subs");
     }
   }, 800);
 }
 
 function getInternalCues() {
   if (state.lastFetchedCues.length > 0) return validateCues(state.lastFetchedCues);
-  // Fallback to textTracks
   try {
     const v = state.video || document.querySelector("video");
     if (v?.textTracks?.length) {
@@ -453,7 +409,7 @@ function destroy() {
   clearInterval(state.pcmIntervalId);
   clearInterval(state.cuePollingId);
   clearInterval(state.videoPoller);
-  
+
   if (state.vadWorker?.terminate) state.vadWorker.terminate();
   if (state.audioCtx) {
     try { state.audioCtx.close(); } catch (_) {}
@@ -467,21 +423,32 @@ function destroy() {
   if (state.subtitleObserver) state.subtitleObserver.disconnect();
   if (state.trackObserver) state.trackObserver.disconnect();
 
+  // Null all refs so post-destroy callbacks hit nothing live
+  state.vadWorker = null;
+  state.audioCtx = state.analyser = null;
+  state.customOverlay = state.ghostOverlay = state.statusBadge = null;
+  state.cylinderUI = state.cylinderBackdrop = null;
+  state.subtitleObserver = state.trackObserver = null;
+  state.pcmIntervalId = state.cuePollingId = state.videoPoller = null;
+
   showNativeSubtitles();
   console.log("[SubSync] Destroyed");
 }
 
 // Initialization
 createStatusBadge(state, handleShowUI);
+updateStatus(state, "SubSync: looking for player…");
 installInterceptors((cues) => {
   state.lastFetchedCues = cues;
   if (state.video) setupSubtitleSystem(cues);
   else state.pendingCues = cues;
 });
 
+let _vpChecks = 0;
 state.videoPoller = setInterval(() => {
   const v = document.querySelector("video");
   if (v && v !== state.video) onVideoReady(v);
+  if (++_vpChecks > 600) clearInterval(state.videoPoller); // ~5 min
 }, 500);
 
 document.addEventListener("keydown", (e) => {
