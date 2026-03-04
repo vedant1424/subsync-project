@@ -1,27 +1,25 @@
-import { escapeHtml } from './utils.js';
+import { escapeHtml, findCueIndexAt, findNextBoundary, detectFPS } from './utils.js';
 
 export class SubtitleEngine {
   constructor(state) {
     this.state = state;
   }
 
+  // Issue 6: Binary search for cue lookup
   getNextCueBoundary(t) {
-    for (let i = 0; i < this.state.mappedCues.length; i++) {
-      const c = this.state.mappedCues[i];
-      if (c.start <= t && c.end > t) return c.end;
-      if (c.start > t) return c.start;
-    }
-    return null;
+    return findNextBoundary(this.state.mappedCues, t);
   }
 
+  // Issue 6: Binary search for active cue
   renderMappedCues(t) {
     if (!this.state.customOverlay) return;
-    const active = this.state.mappedCues.filter(
-      (c) => c.start <= t && c.end > t
-    );
-    const html = active
-      .map((c) => `<div>${escapeHtml(c.text)}</div>`)
-      .join("");
+    
+    const idx = findCueIndexAt(this.state.mappedCues, t);
+    let html = "";
+    if (idx !== -1) {
+      html = `<div>${escapeHtml(this.state.mappedCues[idx].text)}</div>`;
+    }
+    
     if (this.state.customOverlay.innerHTML !== html) {
       this.state.customOverlay.innerHTML = html;
     }
@@ -51,6 +49,17 @@ export class SubtitleEngine {
       g.push(cues[i].start - cues[i - 1].end);
     }
     return g;
+  }
+
+  // Issue 10: FPS Normalization
+  applyFPSNormalization(cues) {
+    const ratio = detectFPS(cues);
+    if (ratio === 1.0) return cues;
+    return cues.map(c => ({
+      ...c,
+      start: c.start * ratio,
+      end: c.end * ratio
+    }));
   }
 
   rebuildMappedCues() {

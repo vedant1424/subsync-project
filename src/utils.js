@@ -30,6 +30,60 @@ export function validateCues(arr) {
   );
 }
 
+/**
+ * Binary search to find the index of the cue active at time T
+ * Returns -1 if no cue is active.
+ */
+export function findCueIndexAt(cues, t) {
+  let low = 0, high = cues.length - 1;
+  while (low <= high) {
+    let mid = (low + high) >>> 1;
+    let c = cues[mid];
+    if (t >= c.start && t < c.end) return mid;
+    if (t < c.start) high = mid - 1;
+    else low = mid + 1;
+  }
+  return -1;
+}
+
+/**
+ * Binary search to find the index of the NEXT cue boundary (start or end)
+ */
+export function findNextBoundary(cues, t) {
+  let low = 0, high = cues.length - 1;
+  let best = null;
+
+  while (low <= high) {
+    let mid = (low + high) >>> 1;
+    let c = cues[mid];
+    
+    // Check if we are inside this cue
+    if (t >= c.start && t < c.end) return c.end;
+    
+    if (c.start > t) {
+      best = c.start;
+      high = mid - 1;
+    } else {
+      low = mid + 1;
+    }
+  }
+  return best;
+}
+
+export function detectFPS(cues) {
+  if (cues.length < 50) return 1.0;
+  const diffs = [];
+  for (let i = 1; i < Math.min(100, cues.length); i++) {
+    const d = cues[i].start - cues[i-1].end;
+    if (d > 0.01 && d < 5) diffs.push(d);
+  }
+  if (!diffs.length) return 1.0;
+  const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+  // If drift suggests 23.976 vs 25 mismatch (approx 4% diff)
+  // This is a placeholder for actual pattern matching logic
+  return 1.0; 
+}
+
 export function parseSRTTime(t) {
   const p = t.replace(",", ".").split(":");
   return (

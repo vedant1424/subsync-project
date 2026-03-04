@@ -1,5 +1,7 @@
 const WORKER_CODE = `
 let segs=[],inSpeech=false,speechStart=0,smoothE=0,subGaps=[];
+let lastMatchTime = 0;
+
 self.onmessage=function(e){
   if(e.data.type==='init'){subGaps=e.data.subtitleGaps||[];segs=[];inSpeech=false;smoothE=0;return;}
   if(e.data.type==='pcm'){
@@ -20,7 +22,12 @@ self.onmessage=function(e){
     }
   }
 };
+
 function tryMatch(){
+  const nowTime = Date.now();
+  if(nowTime - lastMatchTime < 3000) return; // Throttling (Issue 5)
+  lastMatchTime = nowTime;
+
   if(!subGaps.length||segs.length<8)return;
   const ag=[];for(let i=1;i<segs.length;i++)ag.push(segs[i].start-segs[i-1].end);
   const win=Math.min(40,Math.min(ag.length,subGaps.length));
@@ -41,17 +48,27 @@ function tryMatch(){
   }
   self.postMessage({type:'match',confidence:mr,avgRelativeError:avg,bestOffset:bestOff,candidateAnchors:cands});
 }
+
 function dtw(a,b){
-  const n=a.length,m=b.length,band=Math.max(3,Math.floor(Math.max(n,m)*0.2)),INF=1e9;
-  const dp=Array.from({length:n+1},()=>new Float32Array(m+1).fill(INF));
-  dp[0][0]=0;
-  for(let i=1;i<=n;i++){
-    for(let j=Math.max(1,i-band);j<=Math.min(m,i+band);j++){
-      const c=Math.abs(Math.log((a[i-1]||0.001))-Math.log((b[j-1]||0.001)));
-      dp[i][j]=c+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+  try {
+    const n=a.length,m=b.length;
+    // Increased band (Issue 13)
+    const band=Math.max(5,Math.floor(Math.max(n,m)*0.4));
+    const INF=1e9;
+    const dp=Array.from({length:n+1},()=>new Float32Array(m+1).fill(INF));
+    dp[0][0]=0;
+    for(let i=1;i<=n;i++){
+      for(let j=Math.max(1,i-band);j<=Math.min(m,i+band);j++){
+        const c=Math.abs(Math.log((a[i-1]||0.001))-Math.log((b[j-1]||0.001)));
+        dp[i][j]=c+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
+      }
     }
+    if (!isFinite(dp[n][m])) return INF;
+    return dp[n][m];
+  } catch(e) {
+    self.postMessage({type:'error', message: e.toString()});
+    return 1e9;
   }
-  return dp[n][m]===INF?999:dp[n][m];
 }
 `;
 

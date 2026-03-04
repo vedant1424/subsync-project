@@ -4,7 +4,7 @@ import { installInterceptors } from './interceptor.js';
 import { createWorker, initAudioCapture } from './audio.js';
 import { validateCues, hashCues, formatTime } from './utils.js';
 
-console.log("[SubSync v3.1] Initializing Modular...");
+console.log("[SubSync v3.2] Initializing...");
 
 const state = {
   video: null,
@@ -40,13 +40,51 @@ const state = {
   settingUp: false,
   badgeDimTimer: null,
   videoPoller: null,
-  lastFetchedCues: []
+  lastFetchedCues: [],
+  lastConfidence: 0 // Issue 14
 };
 
 const engine = new SubtitleEngine(state);
 
 /* ══════════════════════════════════════════════
-   NATIVE SUBTITLE HIDE/SHOW
+   PERSISTENCE (Issue 11)
+══════════════════════════════════════════════ */
+function getStorageKey() {
+    // Basic hash of URL or title
+    const id = window.location.href.split('?')[0].split('#')[0];
+    return `subsync_anchors_${btoa(id).substring(0, 16)}`;
+}
+
+function saveAnchors() {
+    try {
+        const data = {
+            anchors: state.anchors.filter(a => a.source === 'user'),
+            globalA: state.globalA,
+            globalB: state.globalB,
+            ts: Date.now()
+        };
+        localStorage.setItem(getStorageKey(), JSON.stringify(data));
+    } catch(e) {}
+}
+
+function loadAnchors() {
+    try {
+        const saved = localStorage.getItem(getStorageKey());
+        if (saved) {
+            const data = JSON.parse(saved);
+            if (Date.now() - data.ts < 7 * 86400000) { // 7 days
+                state.anchors = data.anchors;
+                state.globalA = data.globalA;
+                state.globalB = data.globalB;
+                return true;
+            }
+        }
+    } catch(e) {}
+    return false;
+}
+
+/* ══════════════════════════════════════════════
+   NATIVE SUBTITLE HIDE/SHOW (Issue 7 optimization)
 ══════════════════════════════════════════════ */
 function hideNativeSubtitles() {
   state.nativeSubtitleEl =
@@ -72,7 +110,8 @@ function aggressiveHideNativeSubtitles() {
     });
   };
 
-  hideInTree(document.body);
+  const target = document.querySelector('div[class*="player"]') || document.body;
+  hideInTree(target);
 
   if (state.subtitleObserver) state.subtitleObserver.disconnect();
   state.subtitleObserver = new MutationObserver((mutations) => {
@@ -82,9 +121,9 @@ function aggressiveHideNativeSubtitles() {
       });
     }
   });
-  state.subtitleObserver.observe(document.body, {
+  state.subtitleObserver.observe(target, {
     childList: true,
-    subtree: true
+    subtree: target !== document.body // Issue 7 optimization
   });
 }
 
@@ -206,12 +245,24 @@ function setupSubtitleSystem(rawCues) {
   if (state.settingUp) return;
   state.settingUp = true;
   try {
-    state.originalCues = rawCues.map((c) => ({ ...c }));
+    // Issue 10: Apply FPS normalization
+    state.originalCues = engine.applyFPSNormalization(rawCues.map((c) => ({ ...c })));
+    
+    // Issue 8: Memory cleanup
+    state.lastFetchedCues = []; 
+    
     state.subtitleGapSequence = engine.computeSubtitleGapSequence(state.originalCues);
     state.anchors = [];
     state.globalA = 1.0;
     state.globalB = 0.0;
-    state.mappedCues = state.originalCues.map((c) => ({ ...c }));
+
+    // Issue 11: Load persisted anchors
+    if (loadAnchors()) {
+        engine.rebuildMappedCues();
+        updateStatus(state, "SubSync: Restored previous sync ✓");
+    } else {
+        state.mappedCues = state.originalCues.map((c) => ({ ...c }));
+    }
     
     if (state.vadWorker) state.vadWorker.terminate();
     state.vadWorker = createWorker();
@@ -223,7 +274,10 @@ function setupSubtitleSystem(rawCues) {
     hideNativeSubtitles();
     aggressiveHideNativeSubtitles();
     if (state.video) engine.scheduleCueRender(state.video.currentTime);
-    updateStatus(state, `SubSync ✓ ${state.originalCues.length} cues loaded`);
+    
+    if (state.anchors.length === 0) {
+        updateStatus(state, `SubSync ✓ ${state.originalCues.length} cues loaded`);
+    }
   } finally {
     state.settingUp = false;
   }
@@ -231,9 +285,9 @@ function setupSubtitleSystem(rawCues) {
 
 function handleWorkerMessage(e) {
   if (e.data.type !== "match" || !state.driftEnabled) return;
+  
+  // Issue 14: Progressive thresholds
   const conf = e.data.confidence;
-  if (conf < 0.75) return;
-
   const resolved = (e.data.candidateAnchors || [])
     .filter((a) => a.subGapIndex < state.originalCues.length)
     .map((a) => ({
@@ -242,9 +296,17 @@ function handleWorkerMessage(e) {
       confidence: conf
     }));
 
-  if (resolved.length >= 2) {
-    engine.applyMapping([...state.anchors.filter((a) => a.source === "user"), ...resolved]);
-    updateStatus(state, `SubSync: auto ✓ ${Math.round(conf * 100)}%`);
+  if (conf > 0.85) {
+      engine.applyMapping([...state.anchors.filter((a) => a.source === "user"), ...resolved]);
+      updateStatus(state, `SubSync: auto ✓ ${Math.round(conf * 100)}%`);
+  } else if (conf > 0.65) {
+      if (state.lastConfidence > 0.65) {
+          engine.applyMapping([...state.anchors.filter((a) => a.source === "user"), ...resolved]);
+          updateStatus(state, `SubSync: auto ✓ ${Math.round(conf * 100)}%`);
+      }
+      state.lastConfidence = conf;
+  } else {
+      state.lastConfidence = 0;
   }
 }
 
@@ -270,6 +332,7 @@ function setUserAnchor(idx) {
   });
 
   engine.applyMapping(state.anchors);
+  saveAnchors(); // Issue 11
   hideCylinderUI();
   updateStatus(state, `Anchor set @ ${formatTime(at)} → offset ${Math.round(state.globalB * 1000)}ms`);
 }
@@ -289,6 +352,7 @@ function doUndo() {
   } else {
     engine.applyMapping(state.anchors);
   }
+  saveAnchors(); // Issue 11
   updateStatus(state, "Last anchor removed");
   hideCylinderUI();
 }
@@ -447,6 +511,24 @@ window.subtitleCorrector = {
     globalA: state.globalA,
     globalB: state.globalB,
     anchors: state.anchors.length,
-    driftEnabled: state.driftEnabled
-  })
+    driftEnabled: state.driftEnabled,
+    workerActive: !!state.vadWorker,
+    pendingCues: !!state.pendingCues,
+    lastCueHash: state.lastCueHash
+  }),
+  testAudio: () => {
+    if (!state.audioCtx) return 'No audio context';
+    return {
+      state: state.audioCtx.state,
+      sampleRate: state.audioCtx.sampleRate,
+      currentTime: state.audioCtx.currentTime,
+      analyserActive: !!state.analyser
+    };
+  },
+  forceSync: () => {
+    if (state.originalCues.length && state.video) {
+      updateStatus(state, 'Forcing subtitle re-sync...');
+      setupSubtitleSystem(state.originalCues);
+    }
+  }
 };

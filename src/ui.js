@@ -1,4 +1,4 @@
-import { formatTime, escapeHtml } from './utils.js';
+import { formatTime, escapeHtml, findCueIndexAt } from './utils.js';
 
 export function createStatusBadge(state, onShowUI) {
   if (state.statusBadge) state.statusBadge.remove();
@@ -17,7 +17,7 @@ export function createStatusBadge(state, onShowUI) {
     "z-index:2147483646",
     "pointer-events:auto",
     "cursor:pointer",
-    "transition:opacity 0.5s",
+    "transition:opacity 0.2s",
     "user-select:none",
     "border:1px solid rgba(0,180,70,0.4)",
     "box-shadow:0 2px 12px rgba(0,0,0,0.6)"
@@ -32,6 +32,17 @@ export function createStatusBadge(state, onShowUI) {
     } else {
       updateStatus(state, "SubSync: subtitles not detected yet");
     }
+  });
+
+  // Issue 15: Hover listener
+  state.statusBadge.addEventListener("mouseenter", () => {
+    state.statusBadge.style.opacity = "1";
+    clearTimeout(state.badgeDimTimer);
+  });
+  state.statusBadge.addEventListener("mouseleave", () => {
+    state.badgeDimTimer = setTimeout(() => {
+      state.statusBadge.style.opacity = "0.4";
+    }, 2000);
   });
 }
 
@@ -51,7 +62,11 @@ export function showGhostPreview(state) {
     return;
   }
 
+  // Issue 9: Use mapped domain for preview
   const idx = state.selectedCueIndex;
+  
+  // Predict where CURRENT audio time is relative to selected cue
+  // This helps user see "if I set anchor here, what will show up"
   const predOffset =
     state.video.currentTime -
     (state.originalCues[idx].start + state.originalCues[idx].end) / 2;
@@ -72,16 +87,17 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
   if (state.cylinderUI) return;
 
   const t = state.video?.currentTime || 0;
-  let nearestIdx = 0;
-  let minD = Infinity;
-
-  state.originalCues.forEach((c, i) => {
-    const d = Math.abs((c.start + c.end) / 2 - t);
-    if (d < minD) {
-      minD = d;
-      nearestIdx = i;
-    }
-  });
+  
+  // Use binary search for nearest
+  let nearestIdx = findCueIndexAt(state.originalCues, t);
+  if (nearestIdx === -1) {
+      // Find closest instead
+      let minD = Infinity;
+      state.originalCues.forEach((c, i) => {
+        const d = Math.abs((c.start + c.end) / 2 - t);
+        if (d < minD) { minD = d; nearestIdx = i; }
+      });
+  }
   state.selectedCueIndex = nearestIdx;
 
   const offMs = Math.round(state.globalB * 1000);
@@ -137,8 +153,20 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
   document.body.appendChild(state.cylinderBackdrop);
 
   const scroll = state.cylinderUI.querySelector("#scp-scroll");
+  
+  const updateSelectionUI = (newIdx) => {
+    state.selectedCueIndex = newIdx;
+    scroll.querySelectorAll("[data-idx]").forEach((x) => {
+      const isSel = parseInt(x.dataset.idx, 10) === newIdx;
+      x.style.border = isSel ? "1px solid #0a5" : "1px solid #162b1e";
+      x.style.background = isSel ? "rgba(0,140,70,0.15)" : "rgba(255,255,255,0.02)";
+      x.querySelector("span:last-child").style.color = isSel ? "#afa" : "#bbb";
+      if (isSel) x.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    showGhostPreview(state);
+  };
+
   state.originalCues.forEach((cue, i) => {
-    const sel = i === nearestIdx;
     const el = document.createElement("div");
     el.dataset.idx = String(i);
     el.style.cssText = [
@@ -148,34 +176,18 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
       "cursor:pointer",
       "scroll-snap-align:start",
       "font-size:11px",
-      `border:1px solid ${sel ? "#0a5" : "#162b1e"}`,
-      `background:${sel ? "rgba(0,140,70,0.15)" : "rgba(255,255,255,0.02)"}`
+      "border:1px solid #162b1e",
+      "background:rgba(255,255,255,0.02)"
     ].join(";");
     el.innerHTML =
       `<span style="color:#2a4a30;font-size:10px;">${formatTime(cue.start)}</span>&nbsp;` +
-      `<span style="color:${sel ? "#afa" : "#bbb"}">${escapeHtml(cue.text.substring(0, 95))}</span>`;
+      `<span style="color:#bbb">${escapeHtml(cue.text.substring(0, 95))}</span>`;
 
-    el.addEventListener("click", () => {
-      scroll.querySelectorAll("[data-idx]").forEach((x) => {
-        x.style.border = "1px solid #162b1e";
-        x.style.background = "rgba(255,255,255,0.02)";
-        x.querySelector("span:last-child").style.color = "#bbb";
-      });
-      el.style.border = "1px solid #0a5";
-      el.style.background = "rgba(0,140,70,0.15)";
-      el.querySelector("span:last-child").style.color = "#afa";
-      state.selectedCueIndex = parseInt(el.dataset.idx, 10);
-      showGhostPreview(state);
-    });
-
+    el.addEventListener("click", () => updateSelectionUI(i));
     scroll.appendChild(el);
-    if (sel) {
-      setTimeout(() => {
-        el.scrollIntoView({ block: "center", behavior: "smooth" });
-        showGhostPreview(state);
-      }, 80);
-    }
   });
+
+  updateSelectionUI(state.selectedCueIndex);
 
   state.cylinderUI.querySelector("#scp-set").onclick = () => onSetAnchor(state.selectedCueIndex);
   state.cylinderUI.querySelector("#scp-close").onclick = onHideUI;
@@ -185,10 +197,28 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
     updateStatus(state, state.driftEnabled ? "Auto-drift: ON" : "Auto-drift: OFF");
   };
 
+  // Issue 19: Keyboard navigation
+  const handleKey = (e) => {
+    e.stopImmediatePropagation();
+    if (e.key === "Escape") onHideUI();
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      updateSelectionUI(Math.min(state.originalCues.length - 1, state.selectedCueIndex + 1));
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      updateSelectionUI(Math.max(0, state.selectedCueIndex - 1));
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onSetAnchor(state.selectedCueIndex);
+    }
+  };
+
   ["wheel", "keydown", "mousedown", "touchstart"].forEach((ev) =>
     state.cylinderBackdrop.addEventListener(ev, (e) => {
-      e.stopImmediatePropagation();
-      if (ev === "keydown" && e.key === "Escape") onHideUI();
+      if (ev === "keydown") handleKey(e);
+      else e.stopImmediatePropagation();
     }, { capture: true })
   );
 
@@ -200,30 +230,11 @@ export function showCylinderUI(state, engine, onSetAnchor, onUndo, onHideUI) {
     const syncSelectionToTime = () => {
       if (!state.cylinderUI || !state.originalCues.length) return;
       const now = state.video.currentTime || 0;
-      let nearest = state.selectedCueIndex;
-      let best = Infinity;
-      state.originalCues.forEach((c, i) => {
-        const d = Math.abs((c.start + c.end) / 2 - now);
-        if (d < best) {
-          best = d;
-          nearest = i;
-        }
-      });
-      if (nearest === state.selectedCueIndex) return;
-      state.selectedCueIndex = nearest;
-      const selEl = scroll.querySelector(`[data-idx="${nearest}"]`);
-      if (!selEl) return;
-      scroll.querySelectorAll("[data-idx]").forEach((x) => {
-        x.style.border = "1px solid #162b1e";
-        x.style.background = "rgba(255,255,255,0.02)";
-        x.querySelector("span:last-child").style.color = "#bbb";
-      });
-      selEl.style.border = "1px solid #0a5";
-      selEl.style.background = "rgba(0,140,70,0.15)";
-      selEl.querySelector("span:last-child").style.color = "#afa";
-      selEl.scrollIntoView({ block: "center", behavior: "smooth" });
+      const nearest = findCueIndexAt(state.originalCues, now);
+      if (nearest !== -1 && nearest !== state.selectedCueIndex) {
+        updateSelectionUI(nearest);
+      }
     };
     state.video.addEventListener("timeupdate", syncSelectionToTime, { signal: state.controller.signal });
   }
 }
-
